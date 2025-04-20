@@ -1,0 +1,151 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import time
+
+# Measure total execution start time
+start_time = time.time()
+
+# Setup Chrome options
+options = webdriver.ChromeOptions()
+options.add_argument("--start-maximized")
+options.add_argument('--disable-blink-features=AutomationControlled')
+options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+options.add_argument("--log-level=3")
+options.add_experimental_option("excludeSwitches", ["enable-logging"])
+
+# Start the Chrome driver
+driver = webdriver.Chrome(service=Service(), options=options)
+
+try:
+    driver.get("https://www.amazon.in")
+
+    # Start measuring search execution time
+    search_start_time = time.time()
+
+    # Locate the search bar and search for "wireless headphones"
+    search_box = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.ID, "twotabsearchtextbox"))
+    )
+    search_box.clear()
+    search_box.send_keys("wireless headphones")
+    search_box.submit()
+
+    # Wait for the results to load
+    WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "div.s-main-slot"))
+    )
+    time.sleep(3)
+
+    # End search time
+    search_end_time = time.time()
+    search_duration = search_end_time - search_start_time
+    print(f"Search time for 'wireless headphones': {search_duration:.2f} seconds")
+
+    # Try applying Wireless filter
+    try:
+        filter_sections = driver.find_elements(By.CSS_SELECTOR, "div.a-section.a-spacing-none")
+        for section in filter_sections:
+            try:
+                if "Connectivity Technology" in section.text or "Features" in section.text:
+                    checkboxes = section.find_elements(By.CSS_SELECTOR, "li span.a-list-item")
+                    for checkbox in checkboxes:
+                        if "Wireless" in checkbox.text:
+                            checkbox.click()
+                            time.sleep(3)
+                            break
+            except:
+                continue
+    except:
+        pass
+
+    # Try sorting by Price: Low to High
+    try:
+        sort_dropdown = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "span.a-dropdown-container"))
+        )
+        sort_dropdown.click()
+        time.sleep(1)
+
+        price_option = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "a[id*='s-result-sort-select_1']"))
+        )
+        price_option.click()
+    except TimeoutException:
+        try:
+            sort_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Sort') or contains(text(), 'Featured')]"))
+            )
+            sort_button.click()
+            time.sleep(1)
+
+            low_to_high = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Price: Low to High')]"))
+            )
+            low_to_high.click()
+        except:
+            pass
+
+    time.sleep(4)
+
+    # Scrape products
+    products = driver.find_elements(By.CSS_SELECTOR, "div.s-main-slot div[data-component-type='s-search-result']")
+
+    cheapest_product = None
+    lowest_price = float('inf')
+
+    for product in products:
+        try:
+            title = None
+            for selector in ["h2 a span", "h2 span", "h2"]:
+                try:
+                    title = product.find_element(By.CSS_SELECTOR, selector).text
+                    if title:
+                        break
+                except:
+                    continue
+
+            if not title or 'wireless' not in title.lower():
+                continue
+
+            price_text = None
+            price_value = None
+
+            for selector in ["span.a-price-whole", "span.a-price span[aria-hidden='true']", "span.a-price"]:
+                try:
+                    price_element = product.find_element(By.CSS_SELECTOR, selector)
+                    price_text = price_element.text.strip()
+
+                    price_value = ''.join(filter(str.isdigit, price_text))
+                    if price_value:
+                        price_num = int(price_value) if price_value.isdigit() else float('inf')
+                        break
+                except:
+                    continue
+
+            if price_value and price_num < lowest_price:
+                cheapest_product = {
+                    'title': title,
+                    'price': price_text,
+                }
+                lowest_price = price_num
+        except:
+            continue
+
+    if cheapest_product:
+        print(f"Title: {cheapest_product['title']}")
+        print(f"Price: ₹{cheapest_product['price']}")
+    else:
+        print("No wireless headphones with valid prices found.")
+
+except Exception as e:
+    print(f"Error: {str(e)}")
+
+finally:
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f"Total execution time: {execution_time:.2f} seconds")
+    driver.quit()
