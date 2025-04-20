@@ -1,0 +1,238 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import time
+import re
+
+options = webdriver.ChromeOptions()
+options.add_argument("--start-maximized")
+options.add_argument('--disable-blink-features=AutomationControlled')
+options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+
+driver = webdriver.Chrome(service=Service(), options=options)
+
+try:
+    start_time = time.time()
+    driver.get("https://www.amazon.in")
+    search_box = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.ID, "twotabsearchtextbox"))
+    )
+    search_box.clear()
+    search_box.send_keys("wireless headphones")
+    search_box.submit()
+
+    WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "div.s-main-slot"))
+    )
+    time.sleep(3)
+    search_duration = time.time() - start_time
+    print(f"Search for wireless headphones completed in {search_duration:.2f} seconds.")
+
+    start_time = time.time()
+
+    try:
+        filter_sections = driver.find_elements(By.CSS_SELECTOR, "div.a-section.a-spacing-none")
+        for section in filter_sections:
+            try:
+                if "Connectivity Technology" in section.text or "Features" in section.text:
+                    checkboxes = section.find_elements(By.CSS_SELECTOR, "li span.a-list-item")
+                    for checkbox in checkboxes:
+                        if "Wireless" in checkbox.text:
+                            checkbox.click()
+                            time.sleep(3)
+                            break
+            except:
+                continue
+    except:
+        pass
+
+    try:
+        sort_dropdown = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "span.a-dropdown-container"))
+        )
+        sort_dropdown.click()
+        time.sleep(1)
+        review_option = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "a[id*='s-result-sort-select_3']"))
+        )
+        review_option.click()
+    except TimeoutException:
+        try:
+            sort_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Sort') or contains(text(), 'Featured')]"))
+            )
+            sort_button.click()
+            time.sleep(1)
+            review_sort = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Avg. Customer Review') or contains(text(), 'Customer Review')]"))
+            )
+            review_sort.click()
+        except:
+            pass
+
+    time.sleep(4)
+    products = driver.find_elements(By.CSS_SELECTOR, "div.s-main-slot div[data-component-type='s-search-result']")
+    top_product = None
+    product_link = None
+    rating_pattern = r"(\d+(\.\d+)?)\s+out\s+of\s+5"
+
+    for product in products:
+        try:
+            title_element = None
+            for selector in ["h2 a span", "h2 span"]:
+                try:
+                    title_element = product.find_element(By.CSS_SELECTOR, selector)
+                    if title_element:
+                        break
+                except:
+                    continue
+
+            title = title_element.text if title_element else None
+            if not title or 'wireless' not in title.lower():
+                continue
+
+            try:
+                link_element = None
+                for selector in ["h2 a", "h2 a.a-link-normal", ".a-link-normal.s-no-outline"]:
+                    try:
+                        link_element = product.find_element(By.CSS_SELECTOR, selector)
+                        if link_element:
+                            product_link = link_element.get_attribute("href")
+                            break
+                    except:
+                        continue
+
+                if not product_link:
+                    continue
+            except:
+                continue
+
+            price = None
+            for selector in ["span.a-price-whole", "span.a-price span[aria-hidden='true']", "span.a-price"]:
+                try:
+                    price_element = product.find_element(By.CSS_SELECTOR, selector)
+                    price = price_element.text.strip()
+                    if price:
+                        break
+                except:
+                    continue
+
+            if not price:
+                continue
+
+            rating_text = None
+            rating_value = 0
+            try:
+                rating_element = product.find_element(By.CSS_SELECTOR, "span.a-icon-alt")
+                rating_text = rating_element.get_attribute("textContent") or rating_element.text
+
+                match = re.search(rating_pattern, rating_text)
+                if match:
+                    rating_value = float(match.group(1))
+
+                try:
+                    review_count_element = product.find_element(By.CSS_SELECTOR, "span.a-size-base.s-underline-text")
+                    review_count = review_count_element.text.strip()
+                except:
+                    review_count = "N/A"
+
+                top_product = {
+                    'title': title,
+                    'price': price,
+                    'rating': rating_text,
+                    'rating_value': rating_value,
+                    'reviews': review_count,
+                    'link': product_link
+                }
+                break
+            except:
+                continue
+        except Exception as e:
+            continue
+
+    retrieve_duration = time.time() - start_time
+    print(f"Retrieved highest-rated product in {retrieve_duration:.2f} seconds.")
+
+    if top_product:
+        print(f"Title: {top_product['title']}")
+        print(f"Price: ₹{top_product['price']}")
+        print(f"Rating: {top_product['rating']} ({top_product['reviews']} reviews)")
+
+        start_time = time.time()
+
+        if top_product['link']:
+            driver.get(top_product['link'])
+
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "productTitle"))
+            )
+
+            added_to_cart = False
+
+            try:
+                try:
+                    add_to_cart_button = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.ID, "add-to-cart-button"))
+                    )
+                    add_to_cart_button.click()
+                    added_to_cart = True
+                except TimeoutException:
+                    pass
+
+                if not added_to_cart:
+                    try:
+                        one_time_purchase = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.XPATH, "//input[@name='purchase-option' and @value='oneTime']"))
+                        )
+                        one_time_purchase.click()
+                        time.sleep(1)
+
+                        add_to_cart_button = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.ID, "add-to-cart-button"))
+                        )
+                        add_to_cart_button.click()
+                        added_to_cart = True
+                    except:
+                        pass
+
+                if not added_to_cart:
+                    for selector in [
+                        "input[name='submit.add-to-cart']", 
+                        "span#submit\\.add-to-cart input", 
+                        "span#submit\\.add-to-cart-announce",
+                        "input#add-to-cart-button",
+                        "input[title*='Add to Cart']",
+                        "input[title*='Add to Shopping Cart']"
+                    ]:
+                        try:
+                            alt_add_button = WebDriverWait(driver, 2).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                            )
+                            alt_add_button.click()
+                            added_to_cart = True
+                            break
+                        except:
+                            continue
+
+                if added_to_cart:
+                    print("Product successfully added to cart!")
+                else:
+                    print("Failed to add product to cart using all known methods")
+
+            except Exception as e:
+                print(f"Error adding to cart: {str(e)}")
+
+        add_to_cart_duration = time.time() - start_time
+        print(f"Adding item to cart completed in {add_to_cart_duration:.2f} seconds.")
+
+    else:
+        print("No wireless headphones with ratings found.")
+
+except Exception as e:
+    print(f"Error: {str(e)}")
+
+finally:
+    driver.quit()  
